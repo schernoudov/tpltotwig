@@ -47,8 +47,41 @@ function convert ($content, $options) {
     foreach ($matches[0] as $match) {
         $codeBlockStart = $match[1];
         $codeBlockEnd = strpos($content, $options['close_tag'], $codeBlockStart) + strlen($options['close_tag']);
-        var_dump(substr($content, $codeBlockStart, $codeBlockEnd - $codeBlockStart));
+        $codeBlock = covertCodeBlock(substr($content, $codeBlockStart, $codeBlockEnd - $codeBlockStart), $options);
     }
 
     return $content;
+}
+
+function covertCodeBlock ($block, $options) {
+
+    $tokens = token_get_all($block);
+
+    $converted = "";
+    foreach ($tokens as $index => $token) {
+        if (is_array($token)) {
+            switch (token_name($token[0])) {
+                case T_OPEN_TAG:
+                case T_CLOSE_TAG:
+                case T_FOREACH:
+                default:
+                    echo token_name($token[0]), PHP_EOL;
+            }
+        } else {
+            switch ($token) {
+                case '{':
+                    echo $token, PHP_EOL;
+                    break;
+                case '}':
+                    echo $token, PHP_EOL;
+                    break;
+                case '(':
+                    echo $token, PHP_EOL;
+                    break;
+                case ')':
+                    echo $token, PHP_EOL;
+                    break;
+            }
+        }
+    }
 }
