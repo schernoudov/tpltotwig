@@ -86,13 +86,11 @@ function fillContext ($context, $code, $options) {
 	for ($index = 0, $size = count($tokens) ; $index < $size ; $index++) {
 		$token = $tokens[$index];
 		if (is_array($token)) {
-			switch (token_name($token[0])) {
-				case T_OPEN_TAG:
-				case T_CLOSE_TAG:
+			switch ($token[0]) {
+                case T_ECHO:
+                    fillContextForEcho($context, $code);
+                    break;
 				case T_FOREACH:
-				case T_ECHO:
-					$context->operation = 'echo';
-					break;
 				default:
 					echo token_name($token[0]), PHP_EOL;
 			}
@@ -116,6 +114,15 @@ function fillContext ($context, $code, $options) {
 			}
 		}
 	}
+}
+
+function fillContextForEcho($context, $code) {
+
+    $operation = 'echo';
+    $context->operation = $operation;
+    $operandStartIndex = strpos($code, $operation) + strlen($operation) + 1;
+    $operandEndIndex = strpos($code, ';', $operandStartIndex);
+    $context->expression = str_replace('$', '', trim(substr($code, $operandStartIndex, $operandEndIndex - $operandStartIndex)));
 }
 
 class Context {
