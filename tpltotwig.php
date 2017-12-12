@@ -51,14 +51,30 @@ function convert ($content, $options) {
 
     $context = new Context();
 
-    $result = substr($content, 0, strlen($content));
+    $result = "";
+
+    $currentPosition = 0;
 
     foreach ($matches[0] as $match) {
-        $codeBlockStart = $match[1];
-        $codeBlockEnd = strpos($content, $options['close_tag'], $codeBlockStart) + strlen($options['close_tag']);
-        $codeBlock = convertCode(substr($content, $codeBlockStart, $codeBlockEnd - $codeBlockStart), $context, $options);
+
+		$codeBlockStart = $match[1];
+
+		$codeBlockEnd = strpos($content, $options['close_tag'], $codeBlockStart) + strlen($options['close_tag']);
+
+		if ($match[1] - $currentPosition !== 0) {
+			$result .= substr($content, $currentPosition, $match[1] - $currentPosition);
+		}
+
+		$codeBlock = convertCode(substr($content, $codeBlockStart, $codeBlockEnd - $codeBlockStart), $context, $options);
+
         $result = substr_replace($result, $codeBlock, $codeBlockStart, $codeBlockEnd);
+
+		$currentPosition = $codeBlockEnd;
     }
+
+    if ($currentPosition !== strlen($content)) {
+    	$result .= substr($content, $currentPosition, strlen($content) - $currentPosition);
+	}
 
     return $result;
 }
