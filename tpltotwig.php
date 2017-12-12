@@ -65,7 +65,7 @@ function convert ($content, $options) {
 			$result .= substr($content, $currentPosition, $match[1] - $currentPosition);
 		}
 
-		$codeBlock = convertCode(substr($content, $codeBlockStart, $codeBlockEnd - $codeBlockStart), $context, $options);
+		$codeBlock = convertCode(trim(substr($content, $codeBlockStart + strlen($options['open_tag']), $codeBlockEnd - $codeBlockStart - strlen($options['close_tag']) - strlen($options['open_tag']))), $context, $options);
 
         $result = substr_replace($result, $codeBlock, $codeBlockStart, $codeBlockEnd);
 
@@ -89,7 +89,7 @@ function convertCode ($code, $context, $options) {
 
     $metaInformation = parseCode($context, $code, $options);
 
-    $converted = $metaInformation == NULL ? $code : buildCode($metaInformation);
+    $converted = $metaInformation == NULL ? $code : buildCode($metaInformation, $context);
 
     return $converted;
 }
@@ -103,12 +103,34 @@ function buildCode ($meta) {
     switch ($meta->operation) {
         case 'echo':
             $code = buildEcho($meta);
+            break;
+		case 'foreach':
+			$code = buildForeach($meta);
+			break;
+		case 'endforeach':
+			$code = '{% endfor %}';
+			break;
+		case 'endif':
+			$code = '{% endif %}';
+			break;
     }
     return $code;
 }
 
 function buildEcho($meta) {
-    return '{{ '.$meta->argument. ' }}';
+    return '{{ '.processExpression($meta->argument). ' }}';
+}
+
+function buildForeach($meta) {
+	if (isset($meta->key)) {
+		return '{% for '.processExpression($meta->key).', '.processExpression($meta->value).' in '.processExpression($meta->array_expression).' %}';
+	} else {
+		return '{% for '.processExpression($meta->value).' in '.processExpression($meta->array_expression).' %}';
+	}
+}
+
+function processExpression($argument) {
+	return str_replace('$', '', $argument);
 }
 
 /**
@@ -119,83 +141,94 @@ function buildEcho($meta) {
  */
 function parseCode ($context, $code, $options) {
 
-	$tokens = token_get_all($code);
     $meta = NULL;
-	for ($index = 0, $size = count($tokens) ; $index < $size ; $index++) {
-		$token = $tokens[$index];
-		if (is_array($token)) {
-			switch ($token[0]) {
-                case T_ECHO:
-                    $meta = parseEcho($code);
-                    break;
-				case T_FOREACH:
-                    $meta = parseForeach($code);
-				default:
-					echo token_name($token[0]), PHP_EOL;
-			}
-		} else {
-			switch ($token) {
-				case '{':
-					echo $token, PHP_EOL;
-					break;
-				case '}':
-					echo $token, PHP_EOL;
-					break;
-				case '(':
-					echo $token, PHP_EOL;
-					break;
-				case ')':
-					echo $token, PHP_EOL;
-					break;
-				case ';':
-					echo $token, PHP_EOL;
-					break;
-			}
+    $token = "";
+	for ($index = 0, $size = strlen($code) ; $index < $size ; $index++) {
+		if (empty($code[$index])) {
+			$token = "";
+			continue;
+		}
+		$token .= $code[$index];
+		switch ($token) {
+			case 'echo':
+				$meta = parseEcho($code, $index + 1, $context);
+				$token = "";
+				break;
+			case 'foreach':
+				$meta = parseForeach($code, $index + 1, $context);
+				$context->pushBlock('foreach');
+				$token = "";
+				break;
+			case 'if':
+				$meta = parseIf($code, $index + 1, $context);
+				$context->pushBlock('if');
+				$token = "";
+				break;
+			case '}':
+				$meta = (object) [
+					'operation' => 	$context->getCurrentBlock() == 'foreach' ? 'endforeach' :
+						($context->getCurrentBlock() == 'if' ? 'endif' : '')
+				];
+				$context->popBlock();
+				$token = "";
+				break;
 		}
 	}
 
 	return $meta;
 }
 
-function parseEcho ($code) {
+function parseEcho ($code, $index, $context) {
 
     $operation = 'echo';
 
-    $echo = (object) [
+    $meta = (object) [
         'operation' => $operation
     ];
 
-    $operandStartIndex = strpos($code, $operation) + strlen($operation) + 1;
+    $operandStartIndex = strpos($code, $operation, $index) + strlen($operation) + 1;
     $operandEndIndex = strpos($code, ';', $operandStartIndex);
 
-    $echo->argument = trim(substr($code, $operandStartIndex, $operandEndIndex - $operandStartIndex));
+    $meta->argument = parseArgument(trim(substr($code, $operandStartIndex, $operandEndIndex - $operandStartIndex)));
 
-    return $echo;
+    return $meta;
 }
 
-function parseForeach ($code) {
+function parseArgument ($argument) {
+	return $argument;
+}
+
+function parseForeach ($code, $index, $context) {
 
     $operation = 'foreach';
 
-    $foreach = (object) [
+    $meta = (object) [
         'operation' => $operation
     ];
 
-    $expressionStartIndex = strpos($code, $operation) + strlen($operation) + 1;
-    $expressionStartIndex = strpos($code, '(', $expressionStartIndex);
-    $expressionEndIndex = strpos($code, ')', $expressionStartIndex);
+    $expressionStartIndex = strpos ($code, $operation) + strlen($operation);
+    $expressionStartIndex = strpos ($code, '(', $expressionStartIndex) + 1;
+    $expressionEndIndex = strrpos ($code, ')', $expressionStartIndex);
 
-    $condition = explode('as', trim(substr($code, $expressionStartIndex, $expressionEndIndex - $expressionStartIndex)));
-    $foreach->array_expression = $condition[0];
-    if (strpos($condition, '=>')) {
-        $keyValue = explode('=>', $condition[1]);
-        $foreach->key = trim($keyValue[0]);
-        $foreach->value = trim($keyValue[1]);
-    } else {
-        $foreach->value = trim($condition[1]);
-    }
+    $condition = explode(' as ', trim(substr($code, $expressionStartIndex, $expressionEndIndex - $expressionStartIndex)));
+    $meta->array_expression = $condition[0];
+	if (strpos($condition[1], '=>')) {
+		$keyValue = explode('=>', $condition[1]);
+		$meta->key = trim($keyValue[0]);
+		$meta->value = trim($keyValue[1]);
+	} else {
+		$meta->value = trim($condition[1]);
+	}
 
-    return $foreach;
+    return $meta;
+}
+
+function parseIf ($code) {
+	$operation = 'if';
+
+	$meta = (object) [
+		'operation' => $operation
+	];
 }
 
 function parseExpression ($code) {
